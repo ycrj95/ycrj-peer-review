@@ -212,9 +212,34 @@ tbody td{padding:8px 10px;vertical-align:middle}
       </div>
       <div class="ltitle">Sign In</div>
       <div class="ldesc">Access the Peer Review Management System</div>
-      <div class="lfield"><label>Username</label><input type="text" id="lusr" placeholder="Enter username" autocomplete="username"></div>
-      <div class="lfield"><label>Password</label><input type="password" id="lpwd" placeholder="Enter password" autocomplete="current-password"></div>
-      <div class="lerr" id="lerr">Invalid username or password.</div>
+
+      <!-- Login type toggle -->
+      <div style="display:flex;gap:4px;margin-bottom:1.5rem;background:var(--surface2);padding:4px;border-radius:var(--r-sm)">
+        <button id="staffTabBtn" onclick="switchLoginTab('staff')" style="flex:1;padding:7px;border:none;border-radius:var(--r-xs);font-size:13px;font-weight:500;cursor:pointer;background:var(--accent);color:#fff;transition:all .15s">Staff Login</button>
+        <button id="adminTabBtn" onclick="switchLoginTab('admin')" style="flex:1;padding:7px;border:none;border-radius:var(--r-xs);font-size:13px;font-weight:500;cursor:pointer;background:transparent;color:var(--text2);transition:all .15s">Admin Login</button>
+      </div>
+
+      <!-- Staff Login -->
+      <div id="staffLoginFields">
+        <div class="lfield">
+          <label>Select Your Name</label>
+          <select id="staffName" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-size:14px;cursor:pointer">
+            <option value="">-- Loading staff list... --</option>
+          </select>
+        </div>
+        <div class="lfield">
+          <label>Password</label>
+          <input type="password" id="staffPwd" placeholder="Enter your password">
+        </div>
+      </div>
+
+      <!-- Admin Login -->
+      <div id="adminLoginFields" style="display:none">
+        <div class="lfield"><label>Username</label><input type="text" id="lusr" placeholder="Enter username" autocomplete="username"></div>
+        <div class="lfield"><label>Password</label><input type="password" id="lpwd" placeholder="Enter password"></div>
+      </div>
+
+      <div class="lerr" id="lerr">Invalid credentials. Please try again.</div>
       <button class="lbtn" onclick="doLogin()">Sign In →</button>
     </div>
     <div class="lfooter">YCRJ Peer Review System · v2.0</div>
@@ -247,26 +272,50 @@ tbody td{padding:8px 10px;vertical-align:middle}
 const CFG = {
   firm: 'YCRJ and Associates',
   sender: 'info@ycrjca.com',
-  sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7daek7-QkykI3w9ZPq7is_7lemQhISfWloF5vkHVqpJLP3ItgSGD3Z8MEyr1wRd9Yxypjfp0Cu-gp/pub?gid=0&single=true&output=csv',
+  sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=0&single=true&output=csv',
+  partnersUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=2090715945&single=true&output=csv',
+  staffUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=44236813&single=true&output=csv',
   appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxmWBP88ZzkLSh4a4GZ0wbb5wczJuHKNwsMRgWUy-Jk_Zo5rOLjQbkp4sLlCbHW-kQr/exec'
 };
 
 // ══════════════════════════════════════════════
-// USERS
+// USERS — loaded dynamically from Staff_List sheet
 // ══════════════════════════════════════════════
-const USERS = [
-  { username:'admin',        password:'peerreview@2026', role:'admin', name:'Admin' },
-  { username:'navyakuriachan', password:'Nk@Ycrj#7142',  role:'staff', name:'Navya Kuriachan', partners:['Vijayendra R Nayak'] },
-  { username:'ajayj',         password:'Aj@Ycrj#3856',   role:'staff', name:'Ajay J',           partners:['Yashavanth Khanderi'] }
-];
+const ADMIN = { username:'admin', password:'peerreview@2026', role:'admin', name:'Admin' };
+let STAFF_LIST = []; // loaded from sheet
 
-// ══════════════════════════════════════════════
-// PARTNERS
-// ══════════════════════════════════════════════
-const PARTNERS = [
-  { name:'Vijayendra R Nayak',  email:'ajay.j.231@gmail.com' },
-  { name:'Yashavanth Khanderi', email:'navimk18@gmail.com'   }
-];
+// Auto-generate consistent password from staff name
+function genPassword(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = ((hash << 5) - hash) + name.charCodeAt(i);
+    hash |= 0;
+  }
+  const num = Math.abs(hash) % 9000 + 1000;
+  const initials = name.split(' ').map(w => w[0] || '').join('').toUpperCase().substring(0, 3);
+  return initials + '@Ycrj#' + num;
+}
+
+function fetchStaffList(callback) {
+  fetch(CFG.staffUrl + '&cachebust=' + Date.now())
+    .then(r => r.text())
+    .then(csv => {
+      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+      STAFF_LIST = parsed.data
+        .filter(r => r['Staff Name'] && r['Staff Name'].trim() && r['Status'] === 'Yes')
+        .map(r => ({
+          name: r['Staff Name'].trim(),
+          partner: r['Partner Name'] ? r['Partner Name'].trim() : '',
+          password: genPassword(r['Staff Name'].trim()),
+          role: 'staff'
+        }));
+      if (callback) callback();
+    })
+    .catch(() => { if (callback) callback(); });
+}
+
+// Partners — loaded dynamically from Partners_List sheet
+let PARTNERS = [];
 
 // ══════════════════════════════════════════════
 // CHECKLISTS — keyed by Peer Review Tagging code
@@ -317,19 +366,73 @@ let AUDIT = []; // audit log
 // ══════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════
+let loginMode = 'staff'; // 'staff' or 'admin'
+
+function switchLoginTab(mode) {
+  loginMode = mode;
+  document.getElementById('staffLoginFields').style.display = mode === 'staff' ? 'block' : 'none';
+  document.getElementById('adminLoginFields').style.display = mode === 'admin' ? 'block' : 'none';
+  document.getElementById('staffTabBtn').style.background = mode === 'staff' ? 'var(--accent)' : 'transparent';
+  document.getElementById('staffTabBtn').style.color = mode === 'staff' ? '#fff' : 'var(--text2)';
+  document.getElementById('adminTabBtn').style.background = mode === 'admin' ? 'var(--accent)' : 'transparent';
+  document.getElementById('adminTabBtn').style.color = mode === 'admin' ? '#fff' : 'var(--text2)';
+  document.getElementById('lerr').style.display = 'none';
+}
+
+function populateStaffDropdown() {
+  const sel = document.getElementById('staffName');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- Select your name --</option>' +
+    STAFF_LIST.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+}
+
 function doLogin() {
-  const u = document.getElementById('lusr').value.trim();
-  const p = document.getElementById('lpwd').value;
-  const user = USERS.find(x => x.username === u && x.password === p);
-  if (!user) { document.getElementById('lerr').style.display = 'block'; return; }
+  document.getElementById('lerr').style.display = 'none';
+
+  if (loginMode === 'admin') {
+    const u = document.getElementById('lusr').value.trim();
+    const p = document.getElementById('lpwd').value;
+    if (u === ADMIN.username && p === ADMIN.password) {
+      startSession(ADMIN, true);
+    } else {
+      document.getElementById('lerr').style.display = 'block';
+    }
+    return;
+  }
+
+  // Staff login
+  const name = document.getElementById('staffName').value;
+  const pwd  = document.getElementById('staffPwd').value;
+  if (!name) { document.getElementById('lerr').style.display = 'block'; document.getElementById('lerr').textContent = 'Please select your name.'; return; }
+  const staff = STAFF_LIST.find(s => s.name === name);
+  if (!staff) { document.getElementById('lerr').style.display = 'block'; document.getElementById('lerr').textContent = 'Staff not found. Please try again.'; return; }
+  if (pwd !== staff.password) { document.getElementById('lerr').style.display = 'block'; document.getElementById('lerr').textContent = 'Invalid password. Please try again.'; return; }
+  const user = { username: name.replace(/\s+/g,'').toLowerCase(), name: staff.name, role: 'staff', partners: staff.partner ? [staff.partner] : [] };
   startSession(user, true);
 }
+
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('loginPage').style.display !== 'none') doLogin(); });
+
+function fetchPartners() {
+  fetch(CFG.partnersUrl + '&cachebust=' + Date.now())
+    .then(r => r.text())
+    .then(csv => {
+      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+      PARTNERS = parsed.data
+        .filter(r => r['Partner Name'] && r['Partner Name'].trim())
+        .map(r => ({ name: r['Partner Name'].trim(), email: (r['Email ID'] || '').trim() }));
+      // Refresh dashboard if admin is viewing it
+      if (CU && CU.role === 'admin') {
+        const activeTab = document.querySelector('.ntab.on');
+        if (activeTab && activeTab.textContent.trim() === 'Dashboard') rDash();
+      }
+    })
+    .catch(() => {});
+}
 
 function startSession(user, isNewLogin) {
   CU = user;
-  // Save session to localStorage
-  try { localStorage.setItem('ycrj_session', JSON.stringify({ username: user.username })); } catch(e) {}
+  try { localStorage.setItem('ycrj_session', JSON.stringify({ username: user.username, name: user.name, role: user.role, partners: user.partners })); } catch(e) {}
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appShell').style.display = 'flex';
   document.getElementById('uav').textContent = user.name.charAt(0).toUpperCase();
@@ -339,6 +442,7 @@ function startSession(user, isNewLogin) {
   rp.className = 'rpip ' + user.role;
   loadLocal();
   buildNav();
+  fetchPartners();
   fetchUDINs(false);
   if (isNewLogin) log('LOGIN', null, `${user.name} logged in`);
 }
@@ -350,21 +454,32 @@ function doLogout() {
   document.getElementById('loginPage').style.display = 'flex';
   document.getElementById('lusr').value = '';
   document.getElementById('lpwd').value = '';
+  document.getElementById('staffPwd').value = '';
+  document.getElementById('staffName').value = '';
   document.getElementById('lerr').style.display = 'none';
+  switchLoginTab('staff');
 }
 
-// Auto-restore session on page load
+// Load staff list and restore session on page load
 window.addEventListener('load', () => {
-  try {
-    const saved = localStorage.getItem('ycrj_session');
-    if (saved) {
-      const { username } = JSON.parse(saved);
-      const user = USERS.find(x => x.username === username);
-      if (user) { startSession(user, false); return; }
-    }
-  } catch(e) {}
-  // No saved session — show login
-  document.getElementById('loginPage').style.display = 'flex';
+  fetchStaffList(() => {
+    populateStaffDropdown();
+    // Try restore session
+    try {
+      const saved = localStorage.getItem('ycrj_session');
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.role === 'admin' && s.username === ADMIN.username) {
+          startSession(ADMIN, false); return;
+        }
+        if (s.role === 'staff' && s.name) {
+          const user = { username: s.username, name: s.name, role: 'staff', partners: s.partners || [] };
+          startSession(user, false); return;
+        }
+      }
+    } catch(e) {}
+    document.getElementById('loginPage').style.display = 'flex';
+  });
 });
 
 // ══════════════════════════════════════════════
@@ -910,18 +1025,19 @@ function rSetup() {
     </div>
 
     <div class="card">
-      <div class="chead"><span class="ctitle">Staff Credentials</span></div>
+      <div class="chead"><span class="ctitle">Staff Credentials</span><span class="csub">Auto-generated passwords</span></div>
       <div style="padding:1.25rem">
         <table class="cred-table">
-          <thead><tr><th>#</th><th>Name</th><th>Username</th><th>Password</th><th>Role</th><th>Assigned Partner(s)</th></tr></thead>
-          <tbody>${USERS.map((u,i) => `<tr>
-            <td>${i+1}</td><td style="font-weight:600">${u.name}</td>
-            <td class="tmono">${u.username}</td>
-            <td><span class="pwdchip">${u.password}</span></td>
-            <td><span class="rpip ${u.role}">${u.role}</span></td>
-            <td style="font-size:12px;color:var(--text2)">${u.partners ? u.partners.join(', ') : 'All'}</td>
-          </tr>`).join('')}</tbody>
+          <thead><tr><th>#</th><th>Name</th><th>Partner</th><th>Password</th><th>Status</th></tr></thead>
+          <tbody>${STAFF_LIST.length ? STAFF_LIST.map((s,i) => `<tr>
+            <td>${i+1}</td>
+            <td style="font-weight:600">${s.name}</td>
+            <td style="font-size:12px;color:var(--text2)">${s.partner||'—'}</td>
+            <td><span class="pwdchip">${s.password}</span></td>
+            <td><span class="rpip staff">Active</span></td>
+          </tr>`).join('') : '<tr><td colspan="5" class="empty">Loading staff list...</td></tr>'}</tbody>
         </table>
+        <div style="font-size:11px;color:var(--text3);margin-top:10px">Passwords are auto-generated from staff names. Share individually and confidentially.</div>
       </div>
     </div>
 
