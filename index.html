@@ -417,6 +417,12 @@ function doLogin() {
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && document.getElementById('loginPage').style.display !== 'none') doLogin(); });
 
 function fetchPartners() {
+  // Load from cache first
+  try {
+    const cached = localStorage.getItem('ycrj_cache_partners');
+    if (cached) PARTNERS = JSON.parse(cached);
+  } catch(e) {}
+
   fetch(CFG.partnersUrl + '&cachebust=' + Date.now())
     .then(r => r.text())
     .then(csv => {
@@ -424,7 +430,7 @@ function fetchPartners() {
       PARTNERS = parsed.data
         .filter(r => r['Partner Name'] && r['Partner Name'].trim())
         .map(r => ({ name: r['Partner Name'].trim(), email: (r['Email ID'] || '').trim() }));
-      // Refresh dashboard if admin is viewing it
+      try { localStorage.setItem('ycrj_cache_partners', JSON.stringify(PARTNERS)); } catch(e) {}
       if (CU && CU.role === 'admin') {
         const activeTab = document.querySelector('.ntab.on');
         if (activeTab && activeTab.textContent.trim() === 'Dashboard') rDash();
@@ -436,15 +442,7 @@ function fetchPartners() {
 function startSession(user, isNewLogin) {
   CU = user;
   try { localStorage.setItem('ycrj_session', JSON.stringify({ username: user.username, name: user.name, role: user.role, partners: user.partners })); } catch(e) {}
-  document.getElementById('loginPage').style.display = 'none';
-  document.getElementById('appShell').style.display = 'flex';
-  document.getElementById('uav').textContent = user.name.charAt(0).toUpperCase();
-  document.getElementById('uname').textContent = user.name;
-  const rp = document.getElementById('rpip');
-  rp.textContent = user.role === 'admin' ? 'Admin' : 'Staff';
-  rp.className = 'rpip ' + user.role;
-  loadLocal();
-  buildNav();
+  showApp(user);
   fetchPartners();
   fetchUDINs(false);
   if (isNewLogin) log('LOGIN', null, `${user.name} logged in`);
@@ -465,29 +463,70 @@ function doLogout() {
 
 // Load staff list, checklists and restore session on page load
 window.addEventListener('load', () => {
-  // Fetch both staff and checklists in parallel
-  let staffDone = false, checklistDone = false;
-  function tryRestore() {
-    if (!staffDone || !checklistDone) return;
-    populateStaffDropdown();
-    try {
-      const saved = localStorage.getItem('ycrj_session');
-      if (saved) {
-        const s = JSON.parse(saved);
-        if (s.role === 'admin' && s.username === ADMIN.username) {
-          startSession(ADMIN, false); return;
-        }
-        if (s.role === 'staff' && s.name) {
-          const user = { username: s.username, name: s.name, role: 'staff', partners: s.partners || [] };
-          startSession(user, false); return;
-        }
+
+  // ── Show loading indicator on login card ──
+  const dropdown = document.getElementById('staffName');
+  if (dropdown) dropdown.innerHTML = '<option value="">⏳ Loading...</option>';
+
+  // ── Try loading from cache first for instant display ──
+  try {
+    const cachedStaff = localStorage.getItem('ycrj_cache_staff');
+    const cachedCL    = localStorage.getItem('ycrj_cache_cl');
+    const cachedUDINs = localStorage.getItem('ycrj_cache_udins');
+    const cachedPart  = localStorage.getItem('ycrj_cache_partners');
+    if (cachedStaff) { STAFF_LIST = JSON.parse(cachedStaff); populateStaffDropdown(); }
+    if (cachedCL)    { const cl = JSON.parse(cachedCL); CHECKLISTS = cl.checklists||{}; TAG_NAMES = cl.tagNames||{}; }
+    if (cachedUDINs) { UDINS = JSON.parse(cachedUDINs); }
+    if (cachedPart)  { PARTNERS = JSON.parse(cachedPart); }
+  } catch(e) {}
+
+  // ── Try restore session ──
+  let sessionRestored = false;
+  try {
+    const saved = localStorage.getItem('ycrj_session');
+    if (saved) {
+      const s = JSON.parse(saved);
+      if (s.role === 'admin' && s.username === ADMIN.username) {
+        CU = ADMIN;
+        showApp(ADMIN);
+        sessionRestored = true;
+      } else if (s.role === 'staff' && s.name) {
+        const user = { username: s.username, name: s.name, role: 'staff', partners: s.partners || [] };
+        CU = user;
+        showApp(user);
+        sessionRestored = true;
       }
-    } catch(e) {}
+    }
+  } catch(e) {}
+
+  if (!sessionRestored) {
     document.getElementById('loginPage').style.display = 'flex';
   }
-  fetchStaffList(() => { staffDone = true; tryRestore(); });
-  fetchChecklists(() => { checklistDone = true; tryRestore(); });
+
+  // ── Background refresh all data ──
+  fetchStaffList(() => {
+    try { localStorage.setItem('ycrj_cache_staff', JSON.stringify(STAFF_LIST)); } catch(e) {}
+    populateStaffDropdown();
+  });
+  fetchChecklists(() => {
+    try { localStorage.setItem('ycrj_cache_cl', JSON.stringify({ checklists: CHECKLISTS, tagNames: TAG_NAMES })); } catch(e) {}
+  });
+  fetchPartners();
+  if (sessionRestored) fetchUDINs(false);
 });
+
+// Separate function to show app without re-fetching everything
+function showApp(user) {
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('appShell').style.display = 'flex';
+  document.getElementById('uav').textContent = user.name.charAt(0).toUpperCase();
+  document.getElementById('uname').textContent = user.name;
+  const rp = document.getElementById('rpip');
+  rp.textContent = user.role === 'admin' ? 'Admin' : 'Staff';
+  rp.className = 'rpip ' + user.role;
+  loadLocal();
+  buildNav();
+}
 
 // ══════════════════════════════════════════════
 // NAV
@@ -515,6 +554,18 @@ function setTab(el, fn) {
 // FETCH UDINS FROM GOOGLE SHEET
 // ══════════════════════════════════════════════
 function fetchUDINs(isManualSync) {
+  // Load from cache first for instant display
+  if (!isManualSync) {
+    try {
+      const cached = localStorage.getItem('ycrj_cache_udins');
+      if (cached && !UDINS.length) {
+        UDINS = JSON.parse(cached);
+        if (CU && CU.role === 'staff') renderReview();
+        if (CU && CU.role === 'admin') rDash();
+      }
+    } catch(e) {}
+  }
+
   setSyncing(true);
   const before = UDINS.length;
   fetch(CFG.sheetUrl + '&cachebust=' + Date.now())
@@ -522,7 +573,6 @@ function fetchUDINs(isManualSync) {
     .then(csv => {
       const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
       const rows = parsed.data.filter(r => r['UDIN'] && String(r['UDIN']).trim() !== '');
-      // Merge — preserve existing review data, add new entries
       const existing = new Map(UDINS.map(u => [u['UDIN'], u]));
       rows.forEach(r => {
         const udin = String(r['UDIN']).trim();
@@ -534,9 +584,13 @@ function fetchUDINs(isManualSync) {
       setSyncing(false);
       const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
       setSlabel('Synced ' + now);
+      try { localStorage.setItem('ycrj_cache_udins', JSON.stringify(UDINS)); } catch(e) {}
       if (isManualSync) {
         showSyncResult(added, rows.length);
         if (CU.role === 'admin') rDash();
+      } else {
+        if (CU && CU.role === 'staff') renderReview();
+        if (CU && CU.role === 'admin') rDash();
       }
       saveLocal();
     })
@@ -677,7 +731,7 @@ function rDash() {
     <div class="sendbar">
       <div class="sbinfo">
         <h3>📧 Send End-of-Day Report</h3>
-        <p>Sends completion summary to each partner immediately. Auto-sends at 5:15 PM IST via Apps Script.</p>
+        <p>Sends completion summary to each partner immediately. Auto-sends at 10:00 PM IST via Apps Script.</p>
       </div>
       <button class="btn btn-accent" onclick="sendReports()" id="btnSend" style="padding:8px 18px;font-size:13px;font-weight:600">Send to All Partners</button>
     </div>
