@@ -292,8 +292,7 @@ function genPassword(name) {
     hash |= 0;
   }
   const num = Math.abs(hash) % 9000 + 1000;
-  const initials = name.split(' ').map(w => w[0] || '').join('').toUpperCase().substring(0, 3);
-  return initials + '@Ycrj#' + num;
+  return 'YCRJ@' + num;
 }
 
 function fetchStaffList(callback) {
@@ -1025,7 +1024,10 @@ function rSetup() {
     </div>
 
     <div class="card">
-      <div class="chead"><span class="ctitle">Staff Credentials</span><span class="csub">Auto-generated passwords</span></div>
+      <div class="chead">
+        <span class="ctitle">Staff Credentials</span>
+        <button class="btn btn-sm" onclick="downloadCredentials()">⬇ Download as CSV</button>
+      </div>
       <div style="padding:1.25rem">
         <table class="cred-table">
           <thead><tr><th>#</th><th>Name</th><th>Partner</th><th>Password</th><th>Status</th></tr></thead>
@@ -1037,7 +1039,7 @@ function rSetup() {
             <td><span class="rpip staff">Active</span></td>
           </tr>`).join('') : '<tr><td colspan="5" class="empty">Loading staff list...</td></tr>'}</tbody>
         </table>
-        <div style="font-size:11px;color:var(--text3);margin-top:10px">Passwords are auto-generated from staff names. Share individually and confidentially.</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:10px">Passwords are auto-generated. Share individually and confidentially.</div>
       </div>
     </div>
 
@@ -1067,6 +1069,19 @@ function rSetup() {
         </ul>
       </div>
     </div>`;
+}
+
+function downloadCredentials() {
+  const rows = [['#','Staff Name','Partner','Password','Status']];
+  STAFF_LIST.forEach((s, i) => {
+    rows.push([i+1, s.name, s.partner||'', s.password, 'Active']);
+  });
+  const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'YCRJ_Staff_Credentials_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  toast('Credentials downloaded!');
 }
 
 function saveAsUrl() {
