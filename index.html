@@ -276,7 +276,8 @@ const CFG = {
   partnersUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=2090715945&single=true&output=csv',
   staffUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=44236813&single=true&output=csv',
   checklistUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=575841732&single=true&output=csv',
-  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxmWBP88ZzkLSh4a4GZ0wbb5wczJuHKNwsMRgWUy-Jk_Zo5rOLjQbkp4sLlCbHW-kQr/exec'
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxmWBP88ZzkLSh4a4GZ0wbb5wczJuHKNwsMRgWUy-Jk_Zo5rOLjQbkp4sLlCbHW-kQr/exec',
+  reviewDataUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=2013750261&single=true&output=csv'
 };
 
 // ══════════════════════════════════════════════
@@ -445,6 +446,7 @@ function startSession(user, isNewLogin) {
   showApp(user);
   fetchPartners();
   fetchUDINs(false);
+  if (user.role === 'admin') fetchReviewData(() => rDash());
   if (isNewLogin) log('LOGIN', null, `${user.name} logged in`);
 }
 
@@ -655,10 +657,43 @@ function log(action, udin, detail, oldV, newV) {
   if (AUDIT.length > 1000) AUDIT = AUDIT.slice(0, 1000);
 }
 
+// ── Review data from sheet (for admin cross-device visibility) ──
+let SHEET_RD = {}; // keyed by UDIN, loaded from Review_Data sheet
+
+function fetchReviewData(callback) {
+  if (!CFG.reviewDataUrl) { if (callback) callback(); return; }
+  fetch(CFG.reviewDataUrl + '&cachebust=' + Date.now())
+    .then(r => r.text())
+    .then(csv => {
+      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+      SHEET_RD = {};
+      parsed.data.forEach(r => {
+        const udin = (r['UDIN'] || '').trim();
+        if (!udin) return;
+        SHEET_RD[udin] = {
+          status: r['Status'] || 'Pending',
+          completedBy: r['Completed By'] || '',
+          completedDate: r['Completed Date'] || '',
+          turnover: r['Turnover'] || '',
+          borrowings: r['Borrowings'] || '',
+          networth: r['Networth'] || '',
+          reviewRemarks: r['Review Remarks'] || ''
+        };
+      });
+      if (callback) callback();
+    })
+    .catch(() => { if (callback) callback(); });
+}
+
 // ══════════════════════════════════════════════
 // STATUS HELPERS
 // ══════════════════════════════════════════════
 function getStatus(udin) {
+  // Admin reads from sheet data (cross-device)
+  if (CU && CU.role === 'admin' && SHEET_RD[udin]) {
+    return SHEET_RD[udin].status || 'Pending';
+  }
+  // Staff reads from local storage
   const rd = RD[udin];
   if (!rd) return 'Pending';
   if (rd.completed) return 'Completed';
@@ -752,6 +787,7 @@ function doSync() {
   const btn = document.querySelector('.btn-sync');
   if (btn) { btn.disabled = true; btn.textContent = '↺ Syncing...'; }
   fetchUDINs(true);
+  if (CU && CU.role === 'admin') fetchReviewData(() => rDash());
   setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = '↺ Sync Now'; } }, 4000);
 }
 
