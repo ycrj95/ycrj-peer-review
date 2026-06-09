@@ -275,6 +275,7 @@ const CFG = {
   sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=0&single=true&output=csv',
   partnersUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=2090715945&single=true&output=csv',
   staffUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=44236813&single=true&output=csv',
+  checklistUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=575841732&single=true&output=csv',
   appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxmWBP88ZzkLSh4a4GZ0wbb5wczJuHKNwsMRgWUy-Jk_Zo5rOLjQbkp4sLlCbHW-kQr/exec'
 };
 
@@ -317,42 +318,45 @@ function fetchStaffList(callback) {
 let PARTNERS = [];
 
 // ══════════════════════════════════════════════
-// CHECKLISTS — keyed by Peer Review Tagging code
+// CHECKLISTS — loaded dynamically from Checklist sheet
 // ══════════════════════════════════════════════
-const SA_ITEMS = ['Statutory Audit Appointment Letter','ADT 1','Engagement Letter','MRL','Checklists','Accountant\'s Compilation Report','Statutory Audit Report / Other Audit Reports','LFAR (Bank)','Financial Statements / Results','AGM Notice & Directors Report','Director\'s Declaration (Loan given is not out of Borrowed Funds)','DIR 8','MBP 1','Signed Audit Notes / ML','Tally data'];
-const IA_ITEMS = ['Appointment Letter','Signed Report','Signed Audit Notes / ML'];
+let CHECKLISTS = {}; // keyed by Tag code
+let TAG_NAMES  = {}; // keyed by Tag code
 
-const CHECKLISTS = {
-  'SA':   SA_ITEMS,
-  'SBA':  SA_ITEMS,
-  'CSA':  SA_ITEMS,
-  'LR':   SA_ITEMS,
-  'GA':   SA_ITEMS,
-  'TA':   ['Tax Audit Appointment Letter (Signed copy)','Tax Audit MRL (Signed copy)','Computation Sheet','ITR','IT Form','Form 29B','Tax Audit Report (Form 3CD)','Form 10B / 10BB','Tally data'],
-  'Cert': ['Certificate Request Letter','Signed Copy of Certificate issued'],
-  'IA':   IA_ITEMS,
-  'CA':   IA_ITEMS,
-  'CR':   IA_ITEMS,
-  'StA':  ['Appointment Letter','Signed Report'],
-  'RA':   ['Appointment Letter','Signed Audit Report'],
-  'TrA':  ['Appointment Letter','Form 10B','Financial Statements','ITR','IT Form']
-};
+function fetchChecklists(callback) {
+  fetch(CFG.checklistUrl + '&cachebust=' + Date.now())
+    .then(r => r.text())
+    .then(csv => {
+      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+      CHECKLISTS = {};
+      TAG_NAMES  = {};
+      parsed.data.forEach(row => {
+        const tag     = (row['Tag'] || '').trim();
+        const service = (row['Service Name'] || '').trim();
+        if (!tag) return;
+        TAG_NAMES[tag] = service;
+        // Collect all Item columns dynamically
+        const items = Object.keys(row)
+          .filter(k => k.startsWith('Item'))
+          .sort((a, b) => {
+            const na = parseInt(a.replace('Item','').trim()) || 0;
+            const nb = parseInt(b.replace('Item','').trim()) || 0;
+            return na - nb;
+          })
+          .map(k => (row[k] || '').trim())
+          .filter(v => v !== '');
+        if (items.length) CHECKLISTS[tag] = items;
+      });
+      if (callback) callback();
+    })
+    .catch(() => { if (callback) callback(); });
+}
 
 // Helper — get checklist by Peer Review Tagging code
 function getChecklist(tag) {
   if (!tag) return [];
-  // Trim and match — handles extra spaces
-  const t = String(tag).trim();
-  return CHECKLISTS[t] || [];
+  return CHECKLISTS[String(tag).trim()] || [];
 }
-
-// Helper — get display name for tag code
-const TAG_NAMES = {
-  'SA':'Statutory Audit','SBA':'Statutory Branch Audit','CSA':'Central Statutory Audit',
-  'LR':'Limited Review','GA':'Government Audit','TA':'Tax Audit',
-  'Cert':'Certificate','IA':'Internal Audit','CA':'Concurrent Audit',
-  'CR':'Compilation Report','StA':'Stock Audit','RA':'Revenue Audit','TrA':'Trust Audit'
-};
 
 // ══════════════════════════════════════════════
 // STATE
@@ -459,11 +463,13 @@ function doLogout() {
   switchLoginTab('staff');
 }
 
-// Load staff list and restore session on page load
+// Load staff list, checklists and restore session on page load
 window.addEventListener('load', () => {
-  fetchStaffList(() => {
+  // Fetch both staff and checklists in parallel
+  let staffDone = false, checklistDone = false;
+  function tryRestore() {
+    if (!staffDone || !checklistDone) return;
     populateStaffDropdown();
-    // Try restore session
     try {
       const saved = localStorage.getItem('ycrj_session');
       if (saved) {
@@ -478,7 +484,9 @@ window.addEventListener('load', () => {
       }
     } catch(e) {}
     document.getElementById('loginPage').style.display = 'flex';
-  });
+  }
+  fetchStaffList(() => { staffDone = true; tryRestore(); });
+  fetchChecklists(() => { checklistDone = true; tryRestore(); });
 });
 
 // ══════════════════════════════════════════════
