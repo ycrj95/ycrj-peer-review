@@ -1050,13 +1050,6 @@ function openAdminCL(udin) {
     </div>
     <div style="padding:1rem 1.25rem;border-top:1px solid var(--border)">
       <div class="clsect">Review Remarks (Optional)</div>
-      <div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);line-height:1.7">
-        <strong>📋 Before marking complete, please ensure:</strong><br>
-        &nbsp;&nbsp;• Target at least <strong>5 UDINs per day</strong><br>
-        &nbsp;&nbsp;• Only <strong>final Tally data</strong> is saved — no multiple versions or drafts<br>
-        &nbsp;&nbsp;• Only <strong>final Financial Statements</strong> — no draft financials<br>
-        &nbsp;&nbsp;• All documents are <strong>readily available</strong> and organised for the Peer Reviewer
-      </div>
       <textarea id="aclRemarks" rows="2" placeholder="Add any notes or remarks about this UDIN review..."
         style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--text);background:var(--surface);resize:vertical;font-family:'DM Sans',sans-serif"
         oninput="updRemarks(this.value,'${udin}')">${rd.reviewRemarks||''}</textarea>
@@ -1441,13 +1434,6 @@ function openCL(udin) {
     </div>
     <div style="padding:1rem 1.25rem;border-top:1px solid var(--border)">
       <div class="clsect">Review Remarks (Optional)</div>
-      <div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);line-height:1.7">
-        <strong>📋 Before marking complete, please ensure:</strong><br>
-        &nbsp;&nbsp;• Target at least <strong>5 UDINs per day</strong><br>
-        &nbsp;&nbsp;• Only <strong>final Tally data</strong> is saved — no multiple versions or drafts<br>
-        &nbsp;&nbsp;• Only <strong>final Financial Statements</strong> — no draft financials<br>
-        &nbsp;&nbsp;• All documents are <strong>readily available</strong> and organised for the Peer Reviewer
-      </div>
       <textarea id="clRemarks" rows="2" placeholder="Add any notes or remarks about this UDIN review..."
         style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--text);background:var(--surface);resize:vertical;font-family:'DM Sans',sans-serif"
         oninput="updRemarks(this.value,'${udin}')">${rd.reviewRemarks||''}</textarea>
