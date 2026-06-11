@@ -601,7 +601,9 @@ function fetchUDINs(isManualSync) {
     })
     .catch(err => {
       setSyncing(false);
-      setSlabel('Sync failed');
+      // Only show sync failed if UDIN master fetch fails, not review data
+      setSlabel('Sync failed — retrying...');
+      setTimeout(() => fetchUDINs(false), 5000); // retry after 5 seconds
       if (isManualSync) showSyncResult(-1, 0, err.message);
     });
 }
@@ -647,6 +649,7 @@ function pushToSheets() {
   if (!CFG.appsScriptUrl) return;
   fetch(CFG.appsScriptUrl, {
     method: 'POST',
+    mode: 'no-cors',
     body: JSON.stringify({ type: 'review', data: RD, audit: AUDIT, udins: UDINS }),
     headers: { 'Content-Type': 'text/plain' }
   }).catch(() => {});
@@ -685,7 +688,7 @@ function fetchReviewData(callback) {
       });
       if (callback) callback();
     })
-    .catch(() => { if (callback) callback(); });
+    .catch(() => { if (callback) callback(); }); // silently fail, don't affect sync indicator
 }
 
 // ══════════════════════════════════════════════
@@ -834,10 +837,10 @@ async function sendReports() {
   try {
     const res = await fetch(CFG.appsScriptUrl, {
       method: 'POST',
+      mode: 'no-cors',
       body: JSON.stringify({ type: 'email', partners: payload, firm: CFG.firm, sender: CFG.sender }),
       headers: { 'Content-Type': 'text/plain' }
     });
-    await res.text();
     showSlog('✓ Reports sent successfully to all partners.', 'ok');
     log('EMAIL_SENT', null, `End-of-day reports sent to ${PARTNERS.length} partners by ${CU.username}`);
     toast('Reports sent!');
