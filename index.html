@@ -445,8 +445,9 @@ function startSession(user, isNewLogin) {
   try { localStorage.setItem('ycrj_session', JSON.stringify({ username: user.username, name: user.name, role: user.role, partners: user.partners })); } catch(e) {}
   showApp(user);
   fetchPartners();
-  fetchUDINs(false);
-  if (user.role === 'admin') fetchReviewData(() => rDash());
+  fetchReviewData(() => {
+    fetchUDINs(false);
+  });
   if (isNewLogin) log('LOGIN', null, `${user.name} logged in`);
 }
 
@@ -514,7 +515,9 @@ window.addEventListener('load', () => {
     try { localStorage.setItem('ycrj_cache_cl', JSON.stringify({ checklists: CHECKLISTS, tagNames: TAG_NAMES })); } catch(e) {}
   });
   fetchPartners();
-  if (sessionRestored) fetchUDINs(false);
+  if (sessionRestored) {
+    fetchReviewData(() => fetchUDINs(false));
+  }
 });
 
 // Separate function to show app without re-fetching everything
@@ -689,11 +692,11 @@ function fetchReviewData(callback) {
 // STATUS HELPERS
 // ══════════════════════════════════════════════
 function getStatus(udin) {
-  // Admin reads from sheet data (cross-device)
-  if (CU && CU.role === 'admin' && SHEET_RD[udin]) {
-    return SHEET_RD[udin].status || 'Pending';
+  // Check sheet data first (cross-device, all users)
+  if (SHEET_RD[udin] && SHEET_RD[udin].status) {
+    return SHEET_RD[udin].status;
   }
-  // Staff reads from local storage
+  // Fallback to localStorage
   const rd = RD[udin];
   if (!rd) return 'Pending';
   if (rd.completed) return 'Completed';
@@ -721,7 +724,14 @@ function rDash() {
   const inprog = UDINS.filter(r => getStatus(r['UDIN']) === 'In Progress').length;
   const pending = UDINS.filter(r => getStatus(r['UDIN']) === 'Pending').length;
   const todayKey = new Date().toDateString();
-  const todayDone = UDINS.filter(r => { const rd = RD[r['UDIN']]; return rd && rd.completedDate && new Date(rd.completedDate).toDateString() === todayKey; }).length;
+  const todayDone = UDINS.filter(r => {
+    const srd = SHEET_RD[r['UDIN']];
+    if (srd && srd.completedDate) {
+      return new Date(srd.completedDate).toDateString() === todayKey;
+    }
+    const rd = RD[r['UDIN']];
+    return rd && rd.completedDate && new Date(rd.completedDate).toDateString() === todayKey;
+  }).length;
   const pendingPct = total ? Math.round((pending / total) * 100) : 0;
 
   const partners = [...new Set(UDINS.map(r => r['Partner']).filter(Boolean))].sort();
@@ -808,12 +818,18 @@ async function sendReports() {
     const pu = UDINS.filter(r => r['Partner'] === p.name);
     const total = pu.length;
     const completed = pu.filter(r => getStatus(r['UDIN']) === 'Completed').length;
-    const pending = total - completed;
-    const todayDone = pu.filter(r => { const rd = RD[r['UDIN']]; return rd && rd.completedDate && new Date(rd.completedDate).toDateString() === todayKey; }).length;
+    const inProgress = pu.filter(r => getStatus(r['UDIN']) === 'In Progress').length;
+    const pending = total - completed - inProgress;
+    const todayDone = pu.filter(r => {
+      const srd = SHEET_RD[r['UDIN']];
+      if (srd && srd.completedDate) return new Date(srd.completedDate).toDateString() === todayKey;
+      const rd = RD[r['UDIN']];
+      return rd && rd.completedDate && new Date(rd.completedDate).toDateString() === todayKey;
+    }).length;
     const pendingPct = total ? Math.round((pending / total) * 100) : 0;
     const completedList = pu.filter(r => getStatus(r['UDIN']) === 'Completed').map(r => `${r['UDIN']} — ${r['Client Name'] || ''} (${r['Sub-type'] || ''})`);
     const pendingList = pu.filter(r => getStatus(r['UDIN']) !== 'Completed').map(r => `${r['UDIN']} — ${r['Client Name'] || ''} (${r['Sub-type'] || ''})`);
-    return { name: p.name, email: p.email, total, completed, pending, todayDone, pendingPct, completedList, pendingList, date: todayStr };
+    return { name: p.name, email: p.email, total, completed, inProgress, pending, todayDone, pendingPct, completedList, pendingList, date: todayStr };
   });
   try {
     const res = await fetch(CFG.appsScriptUrl, {
@@ -1004,6 +1020,13 @@ function openAdminCL(udin) {
         <span class="clpnum" id="apnum">${pct()}%</span>
       </div>
     </div>
+    <!-- UDIN Details Card -->
+    <div style="background:var(--accent-bg);border-bottom:1px solid var(--accent-border);padding:.875rem 1.25rem;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem">
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Client Name</div><div style="font-size:13px;font-weight:500">${rec['Client Name']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Sub-Type</div><div style="font-size:13px">${rec['Sub-type']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Document Description</div><div style="font-size:12px;color:var(--text2)">${rec['Document Description']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Remarks</div><div style="font-size:12px;color:var(--text2)">${rec['Remarks']||'—'}</div></div>
+    </div>
     <div class="clbody">
       <div class="clsect">Financial Details — Verify &amp; Confirm (Mandatory)</div>
       <div class="fingrid">
@@ -1027,6 +1050,13 @@ function openAdminCL(udin) {
     </div>
     <div style="padding:1rem 1.25rem;border-top:1px solid var(--border)">
       <div class="clsect">Review Remarks (Optional)</div>
+      <div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);line-height:1.7">
+        <strong>📋 Before marking complete, please ensure:</strong><br>
+        &nbsp;&nbsp;• Target at least <strong>5 UDINs per day</strong><br>
+        &nbsp;&nbsp;• Only <strong>final Tally data</strong> is saved — no multiple versions or drafts<br>
+        &nbsp;&nbsp;• Only <strong>final Financial Statements</strong> — no draft financials<br>
+        &nbsp;&nbsp;• All documents are <strong>readily available</strong> and organised for the Peer Reviewer
+      </div>
       <textarea id="aclRemarks" rows="2" placeholder="Add any notes or remarks about this UDIN review..."
         style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--text);background:var(--surface);resize:vertical;font-family:'DM Sans',sans-serif"
         oninput="updRemarks(this.value,'${udin}')">${rd.reviewRemarks||''}</textarea>
@@ -1194,72 +1224,111 @@ function saveAsUrl() {
 // ══════════════════════════════════════════════
 // STAFF REVIEW
 // ══════════════════════════════════════════════
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let filteredData = [];
+
 function rReview() {
   const myPartners = CU.partners || [];
-  const myUDINs = UDINS.filter(r => myPartners.includes(r['Partner']));
-  document.getElementById('mainArea').innerHTML = `
-    <div class="filters">
-      <div class="fg"><label>FY Period</label>
-        <select id="fFY"><option value="">All</option><option>2023-24</option><option>2024-25</option><option>2025-26</option></select></div>
-      <div class="fg"><label>Status</label>
-        <select id="fSt"><option value="">All</option><option>Pending</option><option>In Progress</option><option>Completed</option></select></div>
-      <button class="btn" onclick="applyF()">Apply</button>
-      <button class="btn" onclick="resetF()">Reset</button>
-      <div style="margin-left:auto;font-size:12px;color:var(--text3);align-self:center">
-        Reviewing: <strong style="color:var(--text)">${myPartners.join(', ')}</strong>
+  // Fetch review data from sheet for cross-device status
+  fetchReviewData(() => {
+    const myUDINs = UDINS.filter(r => myPartners.includes(r['Partner']));
+    document.getElementById('mainArea').innerHTML = `
+      <div class="filters">
+        <div class="fg"><label>FY Period</label>
+          <select id="fFY"><option value="">All</option><option>2023-24</option><option>2024-25</option><option>2025-26</option></select></div>
+        <div class="fg"><label>Status</label>
+          <select id="fSt">
+            <option value="active" selected>Pending + In Progress</option>
+            <option value="">All</option>
+            <option>Pending</option>
+            <option>In Progress</option>
+            <option>Completed</option>
+          </select></div>
+        <div class="fg"><label>Search</label>
+          <input type="text" id="fSearch" placeholder="UDIN, client, sub-type..." 
+            style="padding:7px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;min-width:200px"
+            oninput="applyF()"></div>
+        <button class="btn" onclick="applyF()">Apply</button>
+        <button class="btn" onclick="resetF()">Reset</button>
+        <div style="margin-left:auto;font-size:12px;color:var(--text3);align-self:center">
+          Reviewing: <strong style="color:var(--text)">${myPartners.join(', ')}</strong>
+        </div>
       </div>
-    </div>
-    <div class="card">
-      <div class="chead">
-        <span class="ctitle">UDIN List</span>
-        <span class="csub" id="ucnt">${myUDINs.length} record(s)</span>
+      <div class="card">
+        <div class="chead">
+          <span class="ctitle">UDIN List</span>
+          <span class="csub" id="ucnt"></span>
+        </div>
+        <div class="twrap">
+          <table>
+            <thead><tr>
+              <th>Sl.No</th><th>FY</th><th>UDIN</th><th>Review Remarks</th><th>Date of Signing</th>
+              <th>Client Name</th><th>Document Type</th><th>Sub-Type</th>
+              <th>Doc Description</th><th>Remarks</th>
+              <th>Turnover</th><th>Borrowings</th><th>Networth</th><th>Status</th>
+            </tr></thead>
+            <tbody id="ubody"></tbody>
+          </table>
+        </div>
+        <div id="pagination" style="display:flex;align-items:center;justify-content:space-between;padding:.75rem 1.25rem;border-top:1px solid var(--border);font-size:13px"></div>
       </div>
-      <div class="twrap">
-        <table>
-          <thead><tr>
-            <th>Sl.No</th><th>Partner</th><th>FY</th><th>UDIN</th><th>Review Remarks</th><th>Date of Signing</th>
-            <th>Client Name</th><th>Document Type</th><th>Sub-Type</th>
-            <th>Doc Description</th><th>Remarks</th>
-            <th>Turnover</th><th>Borrowings</th><th>Networth</th><th>Status</th>
-          </tr></thead>
-          <tbody id="ubody"></tbody>
-        </table>
-      </div>
-    </div>
-    <div id="clarea"></div>`;
-  drawTable(myUDINs);
+      <div id="clarea"></div>`;
+    applyF();
+  });
 }
 
 function applyF() {
   const myPartners = CU.partners || [];
   let data = UDINS.filter(r => myPartners.includes(r['Partner']));
-  const fy = document.getElementById('fFY').value;
-  const st = document.getElementById('fSt').value;
+  const fy     = (document.getElementById('fFY')||{}).value || '';
+  const st     = (document.getElementById('fSt')||{}).value || '';
+  const search = ((document.getElementById('fSearch')||{}).value || '').toLowerCase().trim();
   if (fy) data = data.filter(r => r['FY'] === fy);
-  if (st) data = data.filter(r => getStatus(r['UDIN']) === st);
-  drawTable(data);
+  if (st === 'active') {
+    data = data.filter(r => getStatus(r['UDIN']) === 'Pending' || getStatus(r['UDIN']) === 'In Progress');
+  } else if (st) {
+    data = data.filter(r => getStatus(r['UDIN']) === st);
+  }
+  if (search) {
+    data = data.filter(r => {
+      return ['UDIN','Client Name','Sub-type','Document Type','Document Description','Remarks','Peer Review Tagging','FY'].some(k =>
+        String(r[k]||'').toLowerCase().includes(search)
+      );
+    });
+  }
+  filteredData = data;
+  currentPage = 1;
+  drawTable(filteredData);
 }
 
 function resetF() {
-  ['fFY','fSt'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  rReview();
+  const fy = document.getElementById('fFY'); if (fy) fy.value = '';
+  const st = document.getElementById('fSt'); if (st) st.value = 'active';
+  const s  = document.getElementById('fSearch'); if (s) s.value = '';
+  applyF();
 }
 
 function drawTable(data) {
   const cnt = document.getElementById('ucnt');
-  if (cnt) cnt.textContent = data.length + ' record(s)';
+  const total = data.length;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  if (currentPage > totalPages) currentPage = 1;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const pageData = data.slice(start, start + PAGE_SIZE);
+  if (cnt) cnt.textContent = `${total} record(s) · Page ${currentPage} of ${Math.max(1,totalPages)}`;
   const tbody = document.getElementById('ubody');
   if (!tbody) return;
   if (!data.length) {
-    tbody.innerHTML = '<tr><td colspan="15" class="empty">No records match the filters.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">No records match the filters.</td></tr>';
+    renderPagination(0, 0);
     return;
   }
-  tbody.innerHTML = data.map(r => {
+  tbody.innerHTML = pageData.map(r => {
     const rd = RD[r['UDIN']] || {};
     return `<tr class="clickable" onclick="openCL('${r['UDIN']}')">
       <td class="tmono">${r['Sl.No']||''}</td>
-      <td>${r['Partner']||''}</td>
-      <td class="tmono">${r['FY']||''}</td>
+      <td class="tmono" style="white-space:nowrap">${r['FY']||''}</td>
       <td class="tmono" style="font-size:11px">${r['UDIN']||''}</td>
       <td class="tclip" style="font-size:12px;color:var(--text2)">${rd.reviewRemarks||'—'}</td>
       <td style="white-space:nowrap">${r['Date of Signing']||''}</td>
@@ -1268,12 +1337,37 @@ function drawTable(data) {
       <td class="tclip">${r['Sub-type']||''}</td>
       <td class="tclip">${r['Document Description']||''}</td>
       <td class="tclip">${r['Remarks']||''}</td>
-      <td class="tmono" style="font-size:11px">${inr(rd.turnover !== undefined ? rd.turnover : r['Turnover'])}</td>
-      <td class="tmono" style="font-size:11px">${inr(rd.borrowings !== undefined ? rd.borrowings : r['Borrowings'])}</td>
-      <td class="tmono" style="font-size:11px">${inr(rd.networth !== undefined ? rd.networth : r['Networth'])}</td>
+      <td class="tmono" style="font-size:11px">${inr(rd.turnover !== undefined && rd.turnover !== '' ? rd.turnover : r['Turnover'])}</td>
+      <td class="tmono" style="font-size:11px">${inr(rd.borrowings !== undefined && rd.borrowings !== '' ? rd.borrowings : r['Borrowings'])}</td>
+      <td class="tmono" style="font-size:11px">${inr(rd.networth !== undefined && rd.networth !== '' ? rd.networth : r['Networth'])}</td>
       <td>${badge(getStatus(r['UDIN']))}</td>
     </tr>`;
   }).join('');
+  renderPagination(totalPages, total);
+}
+
+function renderPagination(totalPages, total) {
+  const el = document.getElementById('pagination');
+  if (!el) return;
+  if (totalPages <= 1) { el.style.display = 'none'; return; }
+  el.style.display = 'flex';
+  const start = (currentPage - 1) * PAGE_SIZE + 1;
+  const end   = Math.min(currentPage * PAGE_SIZE, total);
+  el.innerHTML = `
+    <span style="color:var(--text3)">Showing ${start}–${end} of ${total}</span>
+    <div style="display:flex;gap:4px;align-items:center">
+      <button class="btn btn-sm" onclick="goPage(1)" ${currentPage===1?'disabled':''}>«</button>
+      <button class="btn btn-sm" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>‹ Prev</button>
+      <span style="padding:4px 10px;font-size:13px;font-weight:500">Page ${currentPage} of ${totalPages}</span>
+      <button class="btn btn-sm" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>Next ›</button>
+      <button class="btn btn-sm" onclick="goPage(${totalPages})" ${currentPage===totalPages?'disabled':''}>»</button>
+    </div>`;
+}
+
+function goPage(p) {
+  currentPage = p;
+  drawTable(filteredData);
+  document.getElementById('udinCard') && document.getElementById('udinCard').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 // ══════════════════════════════════════════════
@@ -1317,6 +1411,13 @@ function openCL(udin) {
         <span class="clpnum" id="pnum">${pct()}%</span>
       </div>
     </div>
+    <!-- UDIN Details Card -->
+    <div style="background:var(--accent-bg);border-bottom:1px solid var(--accent-border);padding:.875rem 1.25rem;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:.75rem">
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Client Name</div><div style="font-size:13px;font-weight:500">${rec['Client Name']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Sub-Type</div><div style="font-size:13px">${rec['Sub-type']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Document Description</div><div style="font-size:12px;color:var(--text2)">${rec['Document Description']||'—'}</div></div>
+      <div><div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">Remarks</div><div style="font-size:12px;color:var(--text2)">${rec['Remarks']||'—'}</div></div>
+    </div>
     <div class="clbody">
       <div class="clsect">Financial Details — Verify &amp; Confirm (Mandatory)</div>
       <div class="fingrid">
@@ -1340,7 +1441,14 @@ function openCL(udin) {
     </div>
     <div style="padding:1rem 1.25rem;border-top:1px solid var(--border)">
       <div class="clsect">Review Remarks (Optional)</div>
-      <textarea id="clRemarks" rows="2" placeholder="Add any notes or remarks about this UDIN review..." 
+      <div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--r-sm);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--amber);line-height:1.7">
+        <strong>📋 Before marking complete, please ensure:</strong><br>
+        &nbsp;&nbsp;• Target at least <strong>5 UDINs per day</strong><br>
+        &nbsp;&nbsp;• Only <strong>final Tally data</strong> is saved — no multiple versions or drafts<br>
+        &nbsp;&nbsp;• Only <strong>final Financial Statements</strong> — no draft financials<br>
+        &nbsp;&nbsp;• All documents are <strong>readily available</strong> and organised for the Peer Reviewer
+      </div>
+      <textarea id="clRemarks" rows="2" placeholder="Add any notes or remarks about this UDIN review..."
         style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-sm);font-size:13px;color:var(--text);background:var(--surface);resize:vertical;font-family:'DM Sans',sans-serif"
         oninput="updRemarks(this.value,'${udin}')">${rd.reviewRemarks||''}</textarea>
     </div>
