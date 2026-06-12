@@ -531,6 +531,8 @@ window.addEventListener('load', () => {
 
 // Separate function to show app without re-fetching everything
 function showApp(user) {
+  // Clear old full UDIN cache to force fresh filtered fetch
+  try { localStorage.removeItem('ycrj_cache_udins'); } catch(e) {}
   document.getElementById('loginPage').style.display = 'none';
   document.getElementById('appShell').style.display = 'flex';
   document.getElementById('uav').textContent = user.name.charAt(0).toUpperCase();
@@ -571,9 +573,9 @@ function fetchUDINs(isManualSync) {
   // Load from cache first for instant display
   if (!isManualSync) {
     try {
-      const cacheKey = 'ycrj_cache_udins_' + (CU ? (CU.partners || ['all']).join('_') : 'all');
+      const cacheKey = 'ycrj_cache_udins_' + (CU ? (CU.partners || ['all']).join('_').replace(/\s+/g,'') : 'all');
       const cached = localStorage.getItem(cacheKey);
-      if (cached && !UDINS.length) {
+      if (cached) {
         UDINS = JSON.parse(cached);
         if (CU && CU.role === 'staff') renderReview();
         if (CU && CU.role === 'admin') renderDashboard();
@@ -594,16 +596,21 @@ function fetchUDINs(isManualSync) {
     .then(res => {
       if (res.status !== 'ok') throw new Error(res.msg || 'Failed');
       const rows = res.data || [];
-      const existing = new Map(UDINS.map(u => [u['UDIN'], u]));
-      rows.forEach(r => { existing.set(r['UDIN'], { ...existing.get(r['UDIN']), ...r }); });
-      UDINS = Array.from(existing.values());
+      // For staff — replace UDINS with fresh filtered data
+      // For admin — merge all
+      if (CU && CU.role === 'staff') {
+        UDINS = rows;
+      } else {
+        const existing = new Map(UDINS.map(u => [u['UDIN'], u]));
+        rows.forEach(r => { existing.set(r['UDIN'], { ...existing.get(r['UDIN']), ...r }); });
+        UDINS = Array.from(existing.values());
+      }
       const added = UDINS.length - before;
       setSyncing(false);
       const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
       setSlabel('Synced ' + now);
-      // Cache with partner-specific key
       try {
-        const cacheKey = 'ycrj_cache_udins_' + partner;
+        const cacheKey = 'ycrj_cache_udins_' + partner.replace(/\s+/g,'');
         localStorage.setItem(cacheKey, JSON.stringify(UDINS));
       } catch(e) {}
       if (isManualSync) {
