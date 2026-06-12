@@ -272,7 +272,6 @@ tbody td{padding:8px 10px;vertical-align:middle}
 const CFG = {
   firm: 'YCRJ and Associates',
   sender: 'info@ycrjca.com',
-  sheetUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=0&single=true&output=csv',
   partnersUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=2090715945&single=true&output=csv',
   staffUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=44236813&single=true&output=csv',
   checklistUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT7kDLDW4CAZ8hSWvxnoQkD7pMHZCIbXC0bTjVsGYdNK5fAyJHS1Vfu3oe3vuIZJ5exlpJET6WePk4m/pub?gid=575841732&single=true&output=csv',
@@ -445,10 +444,20 @@ function startSession(user, isNewLogin) {
   try { localStorage.setItem('ycrj_session', JSON.stringify({ username: user.username, name: user.name, role: user.role, partners: user.partners })); } catch(e) {}
   showApp(user);
   fetchPartners();
-  fetchReviewData(() => {
-    fetchUDINs(false);
-  });
-  if (isNewLogin) log('LOGIN', null, `${user.name} logged in`);
+  fetchReviewData(() => fetchUDINs(false));
+  if (isNewLogin) {
+    log('LOGIN', null, `${user.name} logged in`);
+    // Push login audit entry immediately
+    const entry = { ts: new Date().toISOString(), user: user.username, action: 'LOGIN', udin: '', detail: user.name + ' logged in', oldVal: '', newVal: '' };
+    if (CFG.appsScriptUrl) {
+      fetch(CFG.appsScriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ type: 'review_single', udin: 'LOGIN_' + Date.now(), data: { items:{}, completed:false }, auditEntry: entry }),
+        headers: { 'Content-Type': 'text/plain' }
+      }).catch(() => {});
+    }
+  }
 }
 
 function doLogout() {
@@ -556,54 +565,58 @@ function setTab(el, fn) {
 }
 
 // ══════════════════════════════════════════════
-// FETCH UDINS FROM GOOGLE SHEET
+// FETCH UDINS VIA APPS SCRIPT (filtered by partner)
 // ══════════════════════════════════════════════
 function fetchUDINs(isManualSync) {
   // Load from cache first for instant display
   if (!isManualSync) {
     try {
-      const cached = localStorage.getItem('ycrj_cache_udins');
+      const cacheKey = 'ycrj_cache_udins_' + (CU ? (CU.partners || ['all']).join('_') : 'all');
+      const cached = localStorage.getItem(cacheKey);
       if (cached && !UDINS.length) {
         UDINS = JSON.parse(cached);
         if (CU && CU.role === 'staff') renderReview();
-        if (CU && CU.role === 'admin') rDash();
+        if (CU && CU.role === 'admin') renderDashboard();
       }
     } catch(e) {}
   }
 
   setSyncing(true);
   const before = UDINS.length;
-  fetch(CFG.sheetUrl + '&cachebust=' + Date.now())
-    .then(r => r.text())
-    .then(csv => {
-      const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
-      const rows = parsed.data.filter(r => r['UDIN'] && String(r['UDIN']).trim() !== '');
+
+  // Build URL with partner filter
+  const partners = CU && CU.role === 'staff' ? (CU.partners || []) : [];
+  const partner  = partners.length === 1 ? encodeURIComponent(partners[0]) : 'all';
+  const url      = CFG.appsScriptUrl + '?partner=' + partner + '&cachebust=' + Date.now();
+
+  fetch(url)
+    .then(r => r.json())
+    .then(res => {
+      if (res.status !== 'ok') throw new Error(res.msg || 'Failed');
+      const rows = res.data || [];
       const existing = new Map(UDINS.map(u => [u['UDIN'], u]));
-      rows.forEach(r => {
-        const udin = String(r['UDIN']).trim();
-        r['UDIN'] = udin;
-        existing.set(udin, { ...existing.get(udin), ...r });
-      });
+      rows.forEach(r => { existing.set(r['UDIN'], { ...existing.get(r['UDIN']), ...r }); });
       UDINS = Array.from(existing.values());
       const added = UDINS.length - before;
       setSyncing(false);
       const now = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
       setSlabel('Synced ' + now);
-      try { localStorage.setItem('ycrj_cache_udins', JSON.stringify(UDINS)); } catch(e) {}
+      // Cache with partner-specific key
+      try {
+        const cacheKey = 'ycrj_cache_udins_' + partner;
+        localStorage.setItem(cacheKey, JSON.stringify(UDINS));
+      } catch(e) {}
       if (isManualSync) {
         showSyncResult(added, rows.length);
-        if (CU.role === 'admin') rDash();
+        if (CU && CU.role === 'admin') renderDashboard();
       } else {
         if (CU && CU.role === 'staff') renderReview();
-        if (CU && CU.role === 'admin') rDash();
+        if (CU && CU.role === 'admin') renderDashboard();
       }
-      saveLocal();
     })
     .catch(err => {
       setSyncing(false);
-      // Only show sync failed if UDIN master fetch fails, not review data
-      setSlabel('Sync failed — retrying...');
-      setTimeout(() => fetchUDINs(false), 5000); // retry after 5 seconds
+      setSlabel('Sync failed');
       if (isManualSync) showSyncResult(-1, 0, err.message);
     });
 }
@@ -645,14 +658,27 @@ function saveLocal() {
   } catch(e) {}
   pushToSheets();
 }
-function pushToSheets() {
+function pushSingleUDIN(udin, auditEntry) {
   if (!CFG.appsScriptUrl) return;
+  const rd = RD[udin];
+  if (!rd) return;
   fetch(CFG.appsScriptUrl, {
     method: 'POST',
     mode: 'no-cors',
-    body: JSON.stringify({ type: 'review', data: RD, audit: AUDIT, udins: UDINS }),
+    body: JSON.stringify({
+      type: 'review_single',
+      udin: udin,
+      data: rd,
+      auditEntry: auditEntry || null
+    }),
     headers: { 'Content-Type': 'text/plain' }
   }).catch(() => {});
+}
+
+function pushToSheets() {
+  // Legacy — push all RD keys one by one
+  if (!CFG.appsScriptUrl) return;
+  Object.keys(RD).forEach(udin => pushSingleUDIN(udin, null));
 }
 
 // ══════════════════════════════════════════════
@@ -722,15 +748,22 @@ function fts(iso) {
 // ADMIN DASHBOARD
 // ══════════════════════════════════════════════
 function rDash() {
+  fetchReviewData(() => renderDashboard());
+}
+
+function renderDashboard() {
   const total = UDINS.length;
   const completed = UDINS.filter(r => getStatus(r['UDIN']) === 'Completed').length;
   const inprog = UDINS.filter(r => getStatus(r['UDIN']) === 'In Progress').length;
   const pending = UDINS.filter(r => getStatus(r['UDIN']) === 'Pending').length;
-  const todayKey = new Date().toDateString();
+  const todayKey  = new Date().toDateString();
+  const todayDD   = new Date().getDate().toString().padStart(2,'0');
   const todayDone = UDINS.filter(r => {
     const srd = SHEET_RD[r['UDIN']];
     if (srd && srd.completedDate) {
-      return new Date(srd.completedDate).toDateString() === todayKey;
+      // completedDate stored as locale string e.g. "12/06/2026, 10:30:00 am"
+      try { return new Date(srd.completedDate).toDateString() === todayKey; } catch(e) {}
+      return srd.completedDate.startsWith(todayDD);
     }
     const rd = RD[r['UDIN']];
     return rd && rd.completedDate && new Date(rd.completedDate).toDateString() === todayKey;
@@ -1086,6 +1119,8 @@ window.saveAP = function(udin) {
   RD[udin].savedBy = CU.username;
   RD[udin].savedAt = new Date().toISOString();
   saveLocal();
+  const entry = { ts: new Date().toISOString(), user: CU.username, action: 'SAVE', udin, detail: CU.username + ' (admin) saved progress', oldVal: '', newVal: '' };
+  pushSingleUDIN(udin, entry);
   drawAdminTable();
   log('SAVE', udin, `${CU.username} (admin) saved progress`);
   toast('Progress saved ✓');
@@ -1096,6 +1131,8 @@ window.markADone = function(udin) {
   RD[udin].completedBy  = CU.username;
   RD[udin].completedDate= new Date().toISOString();
   saveLocal();
+  const entry = { ts: new Date().toISOString(), user: CU.username, action: wasCompleted?'RE_COMPLETE':'COMPLETE', udin, detail: CU.username + ' (admin) marked UDIN as complete', oldVal: '', newVal: 'Completed' };
+  pushSingleUDIN(udin, entry);
   drawAdminTable();
   log(wasCompleted?'RE_COMPLETE':'COMPLETE', udin, `${CU.username} (admin) marked UDIN as complete`);
   toast('UDIN marked as Completed ✓');
@@ -1237,9 +1274,7 @@ function rReview() {
           <select id="fSt">
             <option value="active" selected>Pending + In Progress</option>
             <option value="">All</option>
-            <option>Pending</option>
-            <option>In Progress</option>
-            <option>Completed</option>
+            <option value="Completed">Completed</option>
           </select></div>
         <div class="fg"><label>Search</label>
           <input type="text" id="fSearch" placeholder="UDIN, client, sub-type..." 
@@ -1476,7 +1511,9 @@ window.saveP = function(udin) {
   RD[udin].savedBy = CU.username;
   RD[udin].savedAt = new Date().toISOString();
   saveLocal();
-  drawTable(UDINS.filter(r => (CU.partners||[]).includes(r['Partner'])));
+  const entry = { ts: new Date().toISOString(), user: CU.username, action: 'SAVE', udin, detail: CU.username + ' saved progress', oldVal: '', newVal: '' };
+  pushSingleUDIN(udin, entry);
+  drawTable(filteredData.length ? filteredData : UDINS.filter(r => (CU.partners||[]).includes(r['Partner'])));
   log('SAVE', udin, `${CU.username} saved progress`);
   toast('Progress saved ✓');
 };
@@ -1487,7 +1524,9 @@ window.markDone = function(udin) {
   RD[udin].completedBy = CU.username;
   RD[udin].completedDate = new Date().toISOString();
   saveLocal();
-  drawTable(UDINS.filter(r => (CU.partners||[]).includes(r['Partner'])));
+  const entry = { ts: new Date().toISOString(), user: CU.username, action: wasCompleted ? 'RE_COMPLETE' : 'COMPLETE', udin, detail: CU.username + ' marked UDIN as complete', oldVal: '', newVal: 'Completed' };
+  pushSingleUDIN(udin, entry);
+  drawTable(filteredData.length ? filteredData : UDINS.filter(r => (CU.partners||[]).includes(r['Partner'])));
   log(wasCompleted ? 'RE_COMPLETE' : 'COMPLETE', udin, `${CU.username} marked UDIN as complete`);
   toast('UDIN marked as Completed ✓');
   const bc = document.getElementById('btnC');
