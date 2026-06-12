@@ -577,8 +577,6 @@ function fetchUDINs(isManualSync) {
       const cached = localStorage.getItem(cacheKey);
       if (cached) {
         UDINS = JSON.parse(cached);
-        if (CU && CU.role === 'staff') renderReview();
-        if (CU && CU.role === 'admin') renderDashboard();
       }
     } catch(e) {}
   }
@@ -596,8 +594,6 @@ function fetchUDINs(isManualSync) {
     .then(res => {
       if (res.status !== 'ok') throw new Error(res.msg || 'Failed');
       const rows = res.data || [];
-      // For staff — replace UDINS with fresh filtered data
-      // For admin — merge all
       if (CU && CU.role === 'staff') {
         UDINS = rows;
       } else {
