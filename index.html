@@ -267,7 +267,7 @@ const CFG = {
   sender: 'info@ycrjca.com',
   github: 'https://ycrj95.github.io/ycrj-peer-review',
   appsScriptUrl: '', // Set in Setup tab — persisted in localStorage
-  reviewDataUrl: '', // Set after Review_Data tab is published
+  reviewDataUrl: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTqvLveYtNkpldv0FaBjnJ9sRkZ3_J44bheWF2E6kYo2BAkrszV02iKQgWQLDbw79wVDjMPMcT2W24G/pub?gid=1129971845&single=true&output=csv',
 
   // Partner tab CSV URLs
   partnerSheets: {
@@ -317,6 +317,12 @@ let filteredData = [];
 // INIT — load cache and restore session
 // ══════════════════════════════════════════════════════
 window.addEventListener('load', () => {
+  // Clear any old cache from previous tool versions
+  ['ycrj_cache_udins','ycrj_cache_staff','ycrj_cache_cl','ycrj_cache_partners',
+   'ycrj_cache_udins_all','ycrj_review','ycrj_audit'].forEach(k => {
+    try { localStorage.removeItem(k); } catch(e) {}
+  });
+
   // Load persisted config
   try {
     const asUrl = localStorage.getItem('ycrj_asurl');
