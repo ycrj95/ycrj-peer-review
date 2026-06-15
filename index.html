@@ -292,7 +292,8 @@ const CFG = {
   checklistUrl:'https://docs.google.com/spreadsheets/d/e/2PACX-1vTqvLveYtNkpldv0FaBjnJ9sRkZ3_J44bheWF2E6kYo2BAkrszV02iKQgWQLDbw79wVDjMPMcT2W24G/pub?gid=947692625&single=true&output=csv'
 };
 
-const ADMIN = { username:'admin', password:'peerreview@2026', role:'admin', name:'Admin' };
+// Admin credentials verified via Apps Script — not stored in code
+const ADMIN_USERNAME = 'admin'; // username only — password checked server-side
 
 // ══════════════════════════════════════════════════════
 // STATE
@@ -349,7 +350,10 @@ window.addEventListener('load', () => {
     const s = localStorage.getItem('ycrj_session');
     if (s) {
       const sess = JSON.parse(s);
-      if (sess.role === 'admin') { CU = ADMIN; launchApp(ADMIN); return; }
+      if (sess.role === 'admin') {
+        const adminUser = { username: 'admin', name: 'Admin', role: 'admin' };
+        CU = adminUser; launchApp(adminUser); return;
+      }
       if (sess.role === 'staff' && sess.name) {
         const user = { username: sess.username, name: sess.name, role: 'staff', partner: sess.partner, password: sess.password };
         CU = user; launchApp(user); return;
@@ -383,13 +387,33 @@ function doLogin() {
   if (loginMode === 'admin') {
     const u = document.getElementById('adminUser').value.trim();
     const p = document.getElementById('adminPwd').value;
-    if (u === ADMIN.username && p === ADMIN.password) {
-      CU = ADMIN;
-      saveSession(ADMIN);
-      launchApp(ADMIN);
-    } else {
-      showErr('Invalid credentials.');
-    }
+    if (!u || !p) { showErr('Please enter username and password.'); return; }
+    if (u !== ADMIN_USERNAME) { showErr('Invalid credentials.'); return; }
+    if (!CFG.appsScriptUrl) { showErr('System not configured. Contact administrator.'); return; }
+    // Verify via Apps Script
+    const btn = document.querySelector('.lbtn');
+    btn.textContent = 'Verifying...'; btn.disabled = true;
+    fetch(CFG.appsScriptUrl, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'verify_admin', username: u, password: p }),
+      headers: { 'Content-Type': 'text/plain' }
+    })
+    .then(r => r.json())
+    .then(res => {
+      btn.textContent = 'Sign In →'; btn.disabled = false;
+      if (res.status === 'ok') {
+        const adminUser = { username: 'admin', name: 'Admin', role: 'admin' };
+        CU = adminUser;
+        saveSession(adminUser);
+        launchApp(adminUser);
+      } else {
+        showErr('Invalid credentials. Please try again.');
+      }
+    })
+    .catch(() => {
+      btn.textContent = 'Sign In →'; btn.disabled = false;
+      showErr('Verification failed. Please try again.');
+    });
     return;
   }
 
@@ -475,7 +499,11 @@ function loadUDINs() {
   if (CU.role === 'staff') {
     loadPartnerUDINs(CU.partner, (rows) => {
       // Filter by staff name
-      UDINS = rows.filter(r => (r['Staff'] || '').trim() === CU.name);
+      // Filter by staff name — handle \r in last column header
+    UDINS = rows.filter(r => {
+      const staffVal = r['Staff'] || r['Staff\r'] || Object.values(r).pop() || '';
+      return staffVal.trim() === CU.name;
+    });
       setSyncing(false);
       setSlabel('Synced ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}));
       loadReviewData(() => rReview());
